@@ -4,6 +4,7 @@ mod commands;
 mod settings;
 mod state;
 mod tray;
+mod updater;
 mod window;
 
 pub use commands::{app_get_state, settings_get, settings_set};
@@ -13,9 +14,10 @@ pub use settings::{
 };
 pub use state::{Quitting, TrayBaseState, TrayExtraItem};
 pub use tray::{rebuild_tray_menu, setup_tray, TraySetupOptions};
+pub use updater::{request_update_check, setup_updater, UPDATE_CHECK_INTERVAL_MS};
 pub use window::{
-    apply_always_on_top, apply_opacity, hide_main, on_window_event, request_quit, show_main,
-    toggle_main, MAIN_WINDOW_LABEL,
+    apply_always_on_top, apply_opacity, attach_show_main_when_ready, hide_main, on_window_event,
+    request_quit, reveal_webview_when_ready, show_main, toggle_main, MAIN_WINDOW_LABEL,
 };
 
 use std::collections::HashMap;
@@ -87,12 +89,15 @@ pub fn install_state<R: Runtime>(app: &AppHandle<R>, options: TrayBaseOptions) -
 }
 
 pub fn with_common_plugins(builder: tauri::Builder<Wry>) -> tauri::Builder<Wry> {
-    builder
-        .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            show_main(app);
-        }))
-        .plugin(tauri_plugin_autostart::Builder::new().build())
+    attach_show_main_when_ready(
+        builder
+            .plugin(tauri_plugin_opener::init())
+            .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+                show_main(app);
+            }))
+            .plugin(tauri_plugin_autostart::Builder::new().build())
+            .plugin(tauri_plugin_updater::Builder::new().build()),
+    )
 }
 
 pub fn apply_window_settings<R: Runtime>(app: &AppHandle<R>) {

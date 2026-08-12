@@ -42,3 +42,5 @@ fn main() {
 ```
 
 Listen for `tray:action` (extra item ids) and `tray:check-updates` from the tray menu.
+
+**Updater:** `Check for Updates` and a 24h background check use `tauri-plugin-updater`. Each app must set `plugins.updater` (`pubkey`, `endpoints`) and `bundle.createUpdaterArtifacts` in `tauri.conf.json`, and sign releases with `TAURI_SIGNING_PRIVATE_KEY`.

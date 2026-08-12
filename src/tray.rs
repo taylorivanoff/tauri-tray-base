@@ -49,6 +49,8 @@ pub fn setup_tray(app: &AppHandle<Wry>, opts: TraySetupOptions) -> tauri::Result
         })
         .build(app)?;
 
+    crate::updater::setup_updater(app);
+
     Ok(())
 }
 
@@ -190,6 +192,7 @@ fn handle_menu_event(app: &AppHandle<Wry>, id: &str) {
             }
         }
         "check-updates" => {
+            crate::updater::request_update_check(app);
             let _ = app.emit("tray:check-updates", ());
         }
         "quit" => request_quit(app),

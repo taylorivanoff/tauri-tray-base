@@ -1,0 +1,17 @@
+[package]
+name = "tauri-tray-base"
+version = "0.1.0"
+edition = "2021"
+description = "Shared Tauri 2 tray-app scaffold for native-renderer Windows/macOS utilities."
+authors = ["Taylor Ivanoff"]
+license = "MIT"
+repository = "https://github.com/taylorivanoff/tauri-tray-base"
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+parking_lot = "0.12"
+tauri-plugin-autostart = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-opener = "2"

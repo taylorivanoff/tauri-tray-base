@@ -44,6 +44,8 @@
     getAppState: () => invoke("app_get_state"),
     onSettingsChanged: (cb) => listen("settings:changed", cb),
     onTrayAction: (cb) => listen("tray:action", cb),
+    onCheckUpdates: (cb) => listen("tray:check-updates", cb),
+    onUpdaterStatus: (cb) => listen("updater:status", cb),
   };
 
   global.tauriTrayBridge = trayBridge;

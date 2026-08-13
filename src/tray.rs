@@ -3,8 +3,7 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::{AppHandle, Emitter, Manager, Wry};
 
 use crate::state::TrayBaseState;
-use crate::window::{hide_main, request_quit, show_main, toggle_main};
-use crate::TrayClickAction;
+use crate::window::{hide_main, request_quit, show_main};
 
 pub struct TraySetupOptions {
     pub tooltip: Option<String>,
@@ -24,7 +23,6 @@ pub fn setup_tray(app: &AppHandle<Wry>, opts: TraySetupOptions) -> tauri::Result
         .default_window_icon()
         .cloned()
         .ok_or_else(|| tauri::Error::AssetNotFound("default window icon".into()))?;
-    let on_click = state.tray_on_click;
 
     TrayIconBuilder::with_id("main-tray")
         .icon(icon)
@@ -35,16 +33,20 @@ pub fn setup_tray(app: &AppHandle<Wry>, opts: TraySetupOptions) -> tauri::Result
             handle_menu_event(app, event.id.as_ref());
         })
         .on_tray_icon_event(move |tray, event| {
-            if let TrayIconEvent::Click {
-                button: MouseButton::Left,
-                button_state: MouseButtonState::Up,
-                ..
-            } = event
-            {
-                match on_click {
-                    TrayClickAction::Toggle => toggle_main(tray.app_handle()),
-                    TrayClickAction::Show => show_main(tray.app_handle()),
+            let app = tray.app_handle();
+            match event {
+                TrayIconEvent::Click {
+                    button: MouseButton::Left,
+                    button_state: MouseButtonState::Up,
+                    ..
                 }
+                | TrayIconEvent::DoubleClick {
+                    button: MouseButton::Left,
+                    ..
+                } => {
+                    show_main(app);
+                }
+                _ => {}
             }
         })
         .build(app)?;

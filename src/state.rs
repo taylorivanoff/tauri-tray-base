@@ -31,6 +31,8 @@ pub struct TrayBaseState {
     pub show_always_on_top: bool,
     pub tray_on_click: TrayClickAction,
     pub main_window_label: String,
+    /// When false, the main window stays hidden until the app calls `show_main`.
+    pub auto_show_main_on_ready: bool,
     pub on_before_quit: Arc<Mutex<Option<Box<dyn Fn() + Send + Sync>>>>,
 }
 

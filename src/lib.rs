@@ -37,6 +37,7 @@ pub struct TrayBaseOptions {
     pub show_always_on_top: bool,
     pub tray_on_click: TrayClickAction,
     pub main_window_label: String,
+    pub auto_show_main_on_ready: bool,
 }
 
 impl Default for TrayBaseOptions {
@@ -50,6 +51,7 @@ impl Default for TrayBaseOptions {
             show_always_on_top: true,
             tray_on_click: TrayClickAction::Toggle,
             main_window_label: MAIN_WINDOW_LABEL.into(),
+            auto_show_main_on_ready: true,
         }
     }
 }
@@ -80,6 +82,7 @@ pub fn install_state<R: Runtime>(app: &AppHandle<R>, options: TrayBaseOptions) -
         show_always_on_top: options.show_always_on_top,
         tray_on_click: options.tray_on_click,
         main_window_label: options.main_window_label,
+        auto_show_main_on_ready: options.auto_show_main_on_ready,
         on_before_quit: Arc::new(Mutex::new(None)),
     };
 

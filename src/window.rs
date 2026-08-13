@@ -228,19 +228,45 @@ pub fn apply_opacity<R: Runtime>(app: &AppHandle<R>, opacity: f64) {
     }
 }
 
+/// Run the app's before-quit hook (cookie flush, etc.).
+///
+/// Must not run WebView2 cookie APIs on the UI thread, so this always joins a
+/// worker. `consume` removes the hook so it cannot run twice on quit.
+pub fn run_before_quit<R: Runtime>(app: &AppHandle<R>, consume: bool) {
+    let Some(state) = app.try_state::<TrayBaseState>() else {
+        return;
+    };
+    let hook = {
+        let mut slot = state.on_before_quit.lock();
+        if consume {
+            slot.take()
+        } else {
+            slot.clone()
+        }
+    };
+    let Some(hook) = hook else {
+        return;
+    };
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    let spawned = std::thread::Builder::new()
+        .name("before-quit".into())
+        .spawn(move || {
+            hook();
+            let _ = tx.send(());
+        })
+        .ok();
+    if spawned.is_some() {
+        let _ = rx.recv_timeout(Duration::from_secs(5));
+    }
+}
+
 pub fn request_quit<R: Runtime>(app: &AppHandle<R>) {
     if let Some(q) = app.try_state::<Quitting>() {
         q.set(true);
     }
 
-    if let Some(state) = app.try_state::<TrayBaseState>() {
-        let hook = state.on_before_quit.lock().take();
-        if let Some(hook) = hook {
-            let _ = std::thread::Builder::new()
-                .name("before-quit".into())
-                .spawn(move || hook());
-        }
-    }
+    run_before_quit(app, true);
 
     if let Some(window) = main_window(app) {
         let _ = window.destroy();

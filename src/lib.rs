@@ -17,8 +17,8 @@ pub use tray::{rebuild_tray_menu, setup_tray, TraySetupOptions};
 pub use updater::{request_update_check, setup_updater, UPDATE_CHECK_INTERVAL_MS};
 pub use window::{
     apply_always_on_top, apply_opacity, attach_show_main_when_ready, hide_main, on_window_event,
-    request_quit, reveal_main_on_startup, reveal_webview_when_ready, show_main, toggle_main,
-    MAIN_WINDOW_LABEL,
+    request_quit, reveal_main_on_startup, reveal_webview_when_ready, run_before_quit, show_main,
+    toggle_main, MAIN_WINDOW_LABEL,
 };
 
 use std::collections::HashMap;
@@ -133,7 +133,7 @@ pub fn set_on_before_quit(app: &AppHandle<Wry>, hook: impl Fn() + Send + Sync + 
     let Some(state) = app.try_state::<TrayBaseState>() else {
         return;
     };
-    *state.on_before_quit.lock() = Some(Box::new(hook));
+    *state.on_before_quit.lock() = Some(Arc::new(hook));
 }
 
 pub fn emit_to_renderer<R: Runtime, S: serde::Serialize + Clone>(

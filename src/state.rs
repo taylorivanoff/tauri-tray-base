@@ -33,7 +33,7 @@ pub struct TrayBaseState {
     pub main_window_label: String,
     /// When false, the main window stays hidden until the app calls `show_main`.
     pub auto_show_main_on_ready: bool,
-    pub on_before_quit: Arc<Mutex<Option<Box<dyn Fn() + Send + Sync>>>>,
+    pub on_before_quit: Arc<Mutex<Option<Arc<dyn Fn() + Send + Sync>>>>,
 }
 
 #[derive(Debug, Clone)]

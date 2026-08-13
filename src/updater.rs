@@ -5,6 +5,9 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, Wry};
 use tauri_plugin_updater::UpdaterExt;
 
+use crate::state::Quitting;
+use crate::window::run_before_quit;
+
 /// Same cadence as electron-tray-base (`UPDATE_CHECK_INTERVAL_MS`).
 pub const UPDATE_CHECK_INTERVAL_MS: u64 = 24 * 60 * 60 * 1000;
 
@@ -98,7 +101,16 @@ async fn check_and_install(app: &AppHandle<Wry>, manual: bool) {
                 emit_status(app, "available", Some(new_version));
             }
 
+            // Flush session data before NSIS kills this process (no before-quit).
+            if let Some(q) = app.try_state::<Quitting>() {
+                q.set(true);
+            }
+            run_before_quit(app, false);
+
             if let Err(e) = update.download_and_install(|_, _| {}, || {}).await {
+                if let Some(q) = app.try_state::<Quitting>() {
+                    q.set(false);
+                }
                 eprintln!("[updater] install failed: {e}");
                 if manual {
                     show_message(

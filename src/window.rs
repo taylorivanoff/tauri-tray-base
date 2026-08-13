@@ -13,6 +13,10 @@ pub const MAIN_WINDOW_LABEL: &str = "main";
 /// often reports `is_visible() == true` for hidden tray windows, so we track this ourselves.
 static MAIN_USER_VISIBLE: AtomicBool = AtomicBool::new(false);
 
+/// Set when `show_main` has successfully activated the window at least once.
+/// Distinct from `MAIN_USER_VISIBLE`, which tracks focus and is cleared on blur.
+static INITIAL_SHOWN: AtomicBool = AtomicBool::new(false);
+
 fn main_label<R: Runtime>(app: &AppHandle<R>) -> String {
     app.try_state::<TrayBaseState>()
         .map(|s| s.main_window_label.clone())
@@ -114,17 +118,12 @@ fn should_auto_show_main<R: Runtime>(app: &AppHandle<R>) -> bool {
 
 /// Show the main window on first page-load Finished (unless start-minimised).
 pub fn attach_show_main_when_ready(builder: tauri::Builder<Wry>) -> tauri::Builder<Wry> {
-    static REVEALED: AtomicBool = AtomicBool::new(false);
-
     builder.on_page_load(move |webview: &Webview<Wry>, payload: &PageLoadPayload<'_>| {
         if payload.event() != PageLoadEvent::Finished {
             return;
         }
         let app = webview.app_handle();
         if webview.label() != main_label(app) {
-            return;
-        }
-        if REVEALED.swap(true, Ordering::SeqCst) {
             return;
         }
         if should_suppress_initial_show(app) {
@@ -135,6 +134,35 @@ pub fn attach_show_main_when_ready(builder: tauri::Builder<Wry>) -> tauri::Build
         }
         show_main(app);
     })
+}
+
+/// Reveal the main window at startup. Waiting only for page-load Finished
+/// deadlocks on Windows: WebView2 often never completes navigation while the
+/// window is hidden (`visible: false` in tauri.conf).
+pub fn reveal_main_on_startup<R: Runtime>(app: &AppHandle<R>) {
+    static STARTED: AtomicBool = AtomicBool::new(false);
+    if STARTED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    if should_suppress_initial_show(app) || !should_auto_show_main(app) {
+        return;
+    }
+
+    show_main(app);
+
+    let app = app.clone();
+    std::thread::spawn(move || {
+        for delay_ms in [150_u64, 400, 1200] {
+            std::thread::sleep(Duration::from_millis(delay_ms));
+            if MAIN_USER_VISIBLE.load(Ordering::SeqCst) || INITIAL_SHOWN.load(Ordering::SeqCst) {
+                return;
+            }
+            if should_suppress_initial_show(&app) {
+                return;
+            }
+            show_main(&app);
+        }
+    });
 }
 
 /// Show a builder-created window after its first page-load Finished.
@@ -150,10 +178,23 @@ pub fn reveal_webview_when_ready(
     }
 }
 
-pub fn show_main<R: Runtime>(app: &AppHandle<R>) {
+fn show_main_now<R: Runtime>(app: &AppHandle<R>) {
     if let Some(window) = main_window_with_retry(app) {
         activate_main_window(app, &window);
         MAIN_USER_VISIBLE.store(true, Ordering::SeqCst);
+        INITIAL_SHOWN.store(true, Ordering::SeqCst);
+    }
+}
+
+pub fn show_main<R: Runtime>(app: &AppHandle<R>) {
+    let app_for_show = app.clone();
+    if app
+        .run_on_main_thread(move || {
+            show_main_now(&app_for_show);
+        })
+        .is_err()
+    {
+        show_main_now(app);
     }
 }
 

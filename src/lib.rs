@@ -17,7 +17,8 @@ pub use tray::{rebuild_tray_menu, setup_tray, TraySetupOptions};
 pub use updater::{request_update_check, setup_updater, UPDATE_CHECK_INTERVAL_MS};
 pub use window::{
     apply_always_on_top, apply_opacity, attach_show_main_when_ready, hide_main, on_window_event,
-    request_quit, reveal_webview_when_ready, show_main, toggle_main, MAIN_WINDOW_LABEL,
+    request_quit, reveal_main_on_startup, reveal_webview_when_ready, show_main, toggle_main,
+    MAIN_WINDOW_LABEL,
 };
 
 use std::collections::HashMap;
@@ -110,6 +111,7 @@ pub fn apply_window_settings<R: Runtime>(app: &AppHandle<R>) {
     let settings = state.settings.lock().clone();
     apply_always_on_top(app, settings.always_on_top);
     apply_opacity(app, settings.opacity);
+    reveal_main_on_startup(app);
 }
 
 pub fn sync_autostart<R: Runtime>(app: &AppHandle<R>) {

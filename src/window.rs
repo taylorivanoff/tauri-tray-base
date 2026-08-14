@@ -9,6 +9,22 @@ use crate::was_launched_minimised;
 
 pub const MAIN_WINDOW_LABEL: &str = "main";
 
+/// Windows: drop native decorations and keep a shadow so apps can use
+/// shared-styles `.window-controls` in the titlebar.
+pub fn enable_frameless_chrome<R: Runtime>(app: &AppHandle<R>) {
+    #[cfg(windows)]
+    {
+        if let Some(main) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+            let _ = main.set_decorations(false);
+            let _ = main.set_shadow(true);
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = app;
+    }
+}
+
 /// Whether the user last saw the main window (show/hide/toggle). WebView2 on Windows
 /// often reports `is_visible() == true` for hidden tray windows, so we track this ourselves.
 static MAIN_USER_VISIBLE: AtomicBool = AtomicBool::new(false);
@@ -98,6 +114,11 @@ fn activate_main_window<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R
     if !always_on_top {
         let _ = window.set_always_on_top(false);
         let _ = window.set_always_on_top(always_on_top);
+    }
+
+    if let Some(state) = app.try_state::<TrayBaseState>() {
+        let opacity = state.settings.lock().opacity;
+        let _ = set_native_opacity(window, opacity);
     }
 }
 
@@ -219,13 +240,148 @@ pub fn apply_always_on_top<R: Runtime>(app: &AppHandle<R>, value: bool) {
     }
 }
 
+/// Electron `BrowserWindow.setOpacity` equivalent. Tauri has no cross-platform
+/// API, so this talks to the OS window handle. CSS opacity is only a fallback.
 pub fn apply_opacity<R: Runtime>(app: &AppHandle<R>, opacity: f64) {
     let opacity = opacity.clamp(0.0, 1.0);
     if let Some(window) = main_window(app) {
-        let _ = window.eval(&format!(
-            "document.documentElement.style.opacity = '{opacity}';"
-        ));
+        if set_native_opacity(&window, opacity) {
+            let _ = window.eval("document.documentElement.style.opacity = '';");
+        } else {
+            let _ = window.eval(&format!(
+                "document.documentElement.style.opacity = '{opacity}';"
+            ));
+        }
     }
+}
+
+fn set_native_opacity<R: Runtime>(window: &WebviewWindow<R>, opacity: f64) -> bool {
+    #[cfg(windows)]
+    {
+        return set_windows_opacity(window, opacity);
+    }
+    #[cfg(target_os = "macos")]
+    {
+        return set_macos_opacity(window, opacity);
+    }
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+    ))]
+    {
+        return set_linux_opacity(window, opacity);
+    }
+    #[allow(unreachable_code)]
+    {
+        let _ = (window, opacity);
+        false
+    }
+}
+
+#[cfg(windows)]
+fn set_windows_opacity<R: Runtime>(window: &WebviewWindow<R>, opacity: f64) -> bool {
+    use std::ffi::c_void;
+
+    type Hwnd = *mut c_void;
+
+    extern "system" {
+        fn GetWindowLongPtrW(hwnd: Hwnd, n_index: i32) -> isize;
+        fn SetWindowLongPtrW(hwnd: Hwnd, n_index: i32, dw_new_long: isize) -> isize;
+        fn SetLayeredWindowAttributes(hwnd: Hwnd, cr_key: u32, b_alpha: u8, dw_flags: u32) -> i32;
+        fn SetWindowPos(
+            hwnd: Hwnd,
+            hwnd_insert_after: Hwnd,
+            x: i32,
+            y: i32,
+            cx: i32,
+            cy: i32,
+            flags: u32,
+        ) -> i32;
+    }
+
+    const GWL_EXSTYLE: i32 = -20;
+    const WS_EX_LAYERED: isize = 0x0008_0000;
+    const LWA_ALPHA: u32 = 0x0000_0002;
+    const SWP_NOSIZE: u32 = 0x0001;
+    const SWP_NOMOVE: u32 = 0x0002;
+    const SWP_NOZORDER: u32 = 0x0004;
+    const SWP_NOACTIVATE: u32 = 0x0010;
+    const SWP_FRAMECHANGED: u32 = 0x0020;
+
+    let Ok(hwnd) = window.hwnd() else {
+        return false;
+    };
+    let hwnd = hwnd.0 as Hwnd;
+    let alpha = (opacity * 255.0).round().clamp(0.0, 255.0) as u8;
+
+    unsafe {
+        let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        if alpha >= 255 {
+            if ex & WS_EX_LAYERED != 0 {
+                SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex & !WS_EX_LAYERED);
+                SetWindowPos(
+                    hwnd,
+                    std::ptr::null_mut(),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+                );
+            }
+        } else {
+            if ex & WS_EX_LAYERED == 0 {
+                SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED);
+                SetWindowPos(
+                    hwnd,
+                    std::ptr::null_mut(),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+                );
+            }
+            if SetLayeredWindowAttributes(hwnd, 0, alpha, LWA_ALPHA) == 0 {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+#[cfg(target_os = "macos")]
+fn set_macos_opacity<R: Runtime>(window: &WebviewWindow<R>, opacity: f64) -> bool {
+    use objc::{msg_send, runtime::Object, sel, sel_impl};
+
+    let Ok(ns_window) = window.ns_window() else {
+        return false;
+    };
+    unsafe {
+        let ns_window = ns_window as *mut Object;
+        let _: () = msg_send![ns_window, setAlphaValue: opacity];
+    }
+    true
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+))]
+fn set_linux_opacity<R: Runtime>(window: &WebviewWindow<R>, opacity: f64) -> bool {
+    use gtk::prelude::WidgetExt;
+
+    let Ok(gtk_window) = window.gtk_window() else {
+        return false;
+    };
+    gtk_window.set_opacity(opacity);
+    true
 }
 
 /// Run the app's before-quit hook (cookie flush, etc.).
@@ -301,6 +457,41 @@ pub fn on_window_event<R: Runtime>(window: &tauri::Window<R>, event: &tauri::Win
                 MAIN_USER_VISIBLE.store(*focused, Ordering::SeqCst);
             }
         }
+        #[cfg(debug_assertions)]
+        tauri::WindowEvent::Resized(size) => log_window_resize(window, size, None),
+        #[cfg(debug_assertions)]
+        tauri::WindowEvent::ScaleFactorChanged {
+            scale_factor,
+            new_inner_size,
+            ..
+        } => log_window_resize(window, new_inner_size, Some(*scale_factor)),
         _ => {}
     }
+}
+
+#[cfg(debug_assertions)]
+fn log_window_resize<R: Runtime>(
+    window: &tauri::Window<R>,
+    physical: &tauri::PhysicalSize<u32>,
+    scale_override: Option<f64>,
+) {
+    let scale = scale_override.unwrap_or_else(|| window.scale_factor().unwrap_or(1.0));
+    let logical = physical.to_logical::<f64>(scale);
+    let outer = window
+        .outer_size()
+        .ok()
+        .map(|size| size.to_logical::<f64>(scale));
+    let outer_part = outer
+        .map(|size| format!("  outer {:.0}x{:.0}", size.width, size.height))
+        .unwrap_or_default();
+    crate::dev_log!(
+        "{} resized  inner {:.0}x{:.0}  physical {}x{}  scale {:.2}x{}",
+        window.label(),
+        logical.width,
+        logical.height,
+        physical.width,
+        physical.height,
+        scale,
+        outer_part
+    );
 }

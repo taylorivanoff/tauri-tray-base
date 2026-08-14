@@ -5,9 +5,19 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
-pub const DEFAULT_OPACITY: f64 = 0.94;
+pub const DEFAULT_OPACITY: f64 = 1.0;
+/// Previous tray-base default; migrated to 1.0 on load.
+const LEGACY_DEFAULT_OPACITY: f64 = 0.94;
 pub const MIN_OPACITY: f64 = 0.35;
 pub const START_MINIMISED_ARG: &str = "--start-minimised";
+
+fn default_opacity() -> f64 {
+    DEFAULT_OPACITY
+}
+
+fn default_false() -> bool {
+    false
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -31,12 +41,15 @@ impl Default for CommonSettings {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PersistedSettings {
+    #[serde(default = "default_opacity")]
     pub opacity: f64,
+    #[serde(default = "default_false")]
     pub always_on_top: bool,
+    #[serde(default = "default_false")]
     pub start_minimised: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub window_bounds: Option<Value>,
-    #[serde(flatten)]
+    #[serde(default, flatten)]
     pub extra: Map<String, Value>,
 }
 
@@ -92,6 +105,16 @@ pub fn clamp_opacity(value: f64) -> f64 {
     value.clamp(MIN_OPACITY, 1.0)
 }
 
+/// Normalize opacity, migrating the old 0.94 tray-base default to fully opaque.
+pub fn normalize_opacity(value: f64) -> f64 {
+    let value = clamp_opacity(value);
+    if (value - LEGACY_DEFAULT_OPACITY).abs() < 0.000_1 {
+        DEFAULT_OPACITY
+    } else {
+        value
+    }
+}
+
 pub fn load_or_create(
     path: &Path,
     defaults: &HashMap<String, Value>,
@@ -99,7 +122,11 @@ pub fn load_or_create(
     if path.exists() {
         let raw = fs::read_to_string(path)?;
         if let Ok(mut settings) = serde_json::from_str::<PersistedSettings>(&raw) {
-            settings.opacity = clamp_opacity(settings.opacity);
+            let before = settings.opacity;
+            settings.opacity = normalize_opacity(settings.opacity);
+            if (before - settings.opacity).abs() > f64::EPSILON {
+                let _ = save(path, &settings);
+            }
             return Ok(settings);
         }
     }
@@ -116,7 +143,7 @@ pub fn load_or_create(
         match k.as_str() {
             "opacity" => {
                 if let Some(n) = v.as_f64() {
-                    settings.opacity = clamp_opacity(n);
+                    settings.opacity = normalize_opacity(n);
                 }
             }
             "alwaysOnTop" => {
@@ -146,7 +173,7 @@ pub fn save(path: &Path, settings: &PersistedSettings) -> Result<(), std::io::Er
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let pretty = serde_json::to_string_pretty(settings)
-        .unwrap_or_else(|_| json!({}).to_string());
+    let pretty =
+        serde_json::to_string_pretty(settings).unwrap_or_else(|_| json!({}).to_string());
     fs::write(path, pretty)
 }

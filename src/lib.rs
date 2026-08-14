@@ -1,6 +1,7 @@
 //! Shared tray-first Tauri 2 scaffold (mirrors electron-tray-base).
 
 mod commands;
+mod log;
 mod settings;
 mod state;
 mod tray;
@@ -9,16 +10,16 @@ mod window;
 
 pub use commands::{app_get_state, settings_get, settings_set};
 pub use settings::{
-    clamp_opacity, save_settings, CommonSettings, PersistedSettings, DEFAULT_OPACITY, MIN_OPACITY,
-    START_MINIMISED_ARG,
+    clamp_opacity, normalize_opacity, save_settings, CommonSettings, PersistedSettings,
+    DEFAULT_OPACITY, MIN_OPACITY, START_MINIMISED_ARG,
 };
 pub use state::{Quitting, TrayBaseState, TrayExtraItem};
 pub use tray::{rebuild_tray_menu, setup_tray, TraySetupOptions};
 pub use updater::{request_update_check, setup_updater, UPDATE_CHECK_INTERVAL_MS};
 pub use window::{
-    apply_always_on_top, apply_opacity, attach_show_main_when_ready, hide_main, on_window_event,
-    request_quit, reveal_main_on_startup, reveal_webview_when_ready, run_before_quit, show_main,
-    toggle_main, MAIN_WINDOW_LABEL,
+    apply_always_on_top, apply_opacity, attach_show_main_when_ready, enable_frameless_chrome,
+    hide_main, on_window_event, request_quit, reveal_main_on_startup, reveal_webview_when_ready,
+    run_before_quit, show_main, toggle_main, MAIN_WINDOW_LABEL,
 };
 
 use std::collections::HashMap;

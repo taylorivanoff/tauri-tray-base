@@ -220,7 +220,33 @@ pub fn show_main<R: Runtime>(app: &AppHandle<R>) {
 }
 
 pub fn hide_main<R: Runtime>(app: &AppHandle<R>) {
+    let app_for_hide = app.clone();
+    if app
+        .run_on_main_thread(move || {
+            hide_main_now(&app_for_hide);
+        })
+        .is_err()
+    {
+        hide_main_now(app);
+    }
+}
+
+fn hide_main_now<R: Runtime>(app: &AppHandle<R>) {
     if let Some(window) = main_window(app) {
+        #[cfg(windows)]
+        {
+            use std::ffi::c_void;
+            type Hwnd = *mut c_void;
+            extern "system" {
+                fn ShowWindow(hwnd: Hwnd, n_cmd_show: i32) -> i32;
+            }
+            const SW_HIDE: i32 = 0;
+            if let Ok(hwnd) = window.hwnd() {
+                unsafe {
+                    ShowWindow(hwnd.0 as Hwnd, SW_HIDE);
+                }
+            }
+        }
         let _ = window.hide();
         MAIN_USER_VISIBLE.store(false, Ordering::SeqCst);
     }
@@ -387,7 +413,9 @@ fn set_linux_opacity<R: Runtime>(window: &WebviewWindow<R>, opacity: f64) -> boo
 /// Run the app's before-quit hook (cookie flush, etc.).
 ///
 /// Must not run WebView2 cookie APIs on the UI thread, so this always joins a
-/// worker. `consume` removes the hook so it cannot run twice on quit.
+/// worker. Callers on the UI/tray thread must not invoke this directly — use
+/// [`request_quit`], which schedules flush + teardown off the UI thread.
+/// `consume` removes the hook so it cannot run twice on quit.
 pub fn run_before_quit<R: Runtime>(app: &AppHandle<R>, consume: bool) {
     let Some(state) = app.try_state::<TrayBaseState>() else {
         return;
@@ -417,21 +445,41 @@ pub fn run_before_quit<R: Runtime>(app: &AppHandle<R>, consume: bool) {
     }
 }
 
-pub fn request_quit<R: Runtime>(app: &AppHandle<R>) {
-    if let Some(q) = app.try_state::<Quitting>() {
-        q.set(true);
-    }
-
-    run_before_quit(app, true);
-
+fn teardown_and_exit<R: Runtime>(app: &AppHandle<R>) {
     if let Some(window) = main_window(app) {
         let _ = window.destroy();
     }
     if let Some(tray) = app.tray_by_id("main-tray") {
         let _ = tray.set_visible(false);
     }
-
     app.exit(0);
+}
+
+/// Quit from the tray/UI thread without deadlocking WebView2.
+///
+/// Joining cookie flush on the menu handler blocks the UI thread; WebView2
+/// cookie COM then cannot marshal back, hangs until timeout, and crashes when
+/// the window is destroyed under the in-flight call.
+pub fn request_quit<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(q) = app.try_state::<Quitting>() {
+        q.set(true);
+    }
+
+    let app = app.clone();
+    let _ = std::thread::Builder::new()
+        .name("quit".into())
+        .spawn(move || {
+            run_before_quit(&app, true);
+            let app_for_exit = app.clone();
+            if app
+                .run_on_main_thread(move || {
+                    teardown_and_exit(&app_for_exit);
+                })
+                .is_err()
+            {
+                teardown_and_exit(&app);
+            }
+        });
 }
 
 pub fn on_window_event<R: Runtime>(window: &tauri::Window<R>, event: &tauri::WindowEvent) {

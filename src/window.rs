@@ -153,6 +153,11 @@ pub fn attach_show_main_when_ready(builder: tauri::Builder<Wry>) -> tauri::Build
         if !should_auto_show_main(app) {
             return;
         }
+        // Only the first Finished reveals the window. Later loads (SPA reloads,
+        // cancelled chrome-control navigations, Refresh) must not undo hide-to-tray.
+        if INITIAL_SHOWN.load(Ordering::SeqCst) {
+            return;
+        }
         show_main(app);
     })
 }
